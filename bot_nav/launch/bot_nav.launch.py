@@ -15,12 +15,22 @@ def generate_launch_description():
             get_package_share_directory('bot_nav'), 'config', 'nav2_params.yaml'
         ),
     )
+    rviz_config_file = DeclareLaunchArgument(
+        'rviz_config_file',
+        default_value=os.path.join(
+            get_package_share_directory('bot_nav'), 'config', 'nav.rviz'
+        ),
+        description='Full path to the RVIZ config file to use',
+    )
 
     sim_pkg = get_package_share_directory('bot_sim')
     sim_launch = os.path.join(sim_pkg, 'launch', 'bot_sim.launch.py')
     sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(sim_launch),
-        launch_arguments=[('use_sim_time', LaunchConfiguration('use_sim_time'))],
+        launch_arguments=[
+            ('use_sim_time', LaunchConfiguration('use_sim_time'),), 
+            ('rviz_config_file', LaunchConfiguration('rviz_config_file'))
+        ],
     )
 
     nav2_pkg = get_package_share_directory('nav2_bringup')
@@ -35,4 +45,4 @@ def generate_launch_description():
             ('use_composition', 'False'),
         ],
     )
-    return LaunchDescription([use_sim_time, params_file, sim, navigation])
+    return LaunchDescription([use_sim_time, params_file, rviz_config_file, sim, navigation])

@@ -14,7 +14,13 @@ def generate_launch_description():
     urdf_file = os.path.join(pkg_bringup, 'urdf', 'bot_one.urdf')
     ros_gz_sim_pkg = get_package_share_directory('ros_gz_sim')
     world_file = os.path.join(pkg_bringup, 'worlds', 'empty_with_sensors.sdf')
+    rviz_config = os.path.join(pkg_bringup, 'config', 'bot.rviz')
     robot_description = Command(['xacro ', urdf_file])
+    rviz_config_file = DeclareLaunchArgument(
+        'rviz_config_file',
+        default_value=rviz_config,
+        description='Full path to the RVIZ config file to use',
+    )
     use_time = DeclareLaunchArgument(
         'use_sim_time',
         default_value='true',
@@ -97,7 +103,7 @@ def generate_launch_description():
         executable='rviz2',
         name='rviz2',
         output='screen',
-        arguments=['-d', os.path.join(pkg_bringup, 'config', 'bot.rviz')],
+        arguments=['-d', LaunchConfiguration('rviz_config_file')],
         parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
     )
     ld.add_action(rviz)
