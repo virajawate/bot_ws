@@ -15,6 +15,12 @@ def generate_launch_description():
             get_package_share_directory('bot_nav'), 'config', 'nav2_params.yaml'
         ),
     )
+    map_yaml_file = DeclareLaunchArgument(
+        'map',
+        default_value=os.path.join(
+            get_package_share_directory('bot_nav'), 'map', 'bot_map.yaml'
+        ),
+    )
     rviz_config_file = DeclareLaunchArgument(
         'rviz_config_file',
         default_value=os.path.join(
@@ -39,10 +45,10 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(nav2_launch),
         launch_arguments=[
             ('slam', 'True'),
-            ('map', ''),
+            ('map', LaunchConfiguration('map')),
             ('use_sim_time', LaunchConfiguration('use_sim_time')),
             ('params_file', LaunchConfiguration('params_file')),
             ('use_composition', 'False'),
         ],
     )
-    return LaunchDescription([use_sim_time, params_file, rviz_config_file, sim, navigation])
+    return LaunchDescription([use_sim_time, params_file, rviz_config_file, map_yaml_file, sim, navigation])
