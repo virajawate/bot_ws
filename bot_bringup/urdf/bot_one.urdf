@@ -1,6 +1,8 @@
 <?xml version="1.0" ?>
 <robot name="Jeevan" xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:property name="scale" value="0.5"/>
+  <xacro:property name="wheel_slip1" value="0.1"/>
+  <xacro:property name="wheel_slip2" value="0.1"/>
 
   <link name="base_footprint">
     <visual>
@@ -107,9 +109,7 @@
       <geometry>
         <sphere radius="${0.081 * scale}"/>
       </geometry>
-      <material name="blue">
-        <color rgba="0.2 0.2 1 1"/>
-      </material>
+      <material name="blue"/>
     </visual>
     <collision>
       <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
@@ -119,9 +119,15 @@
     </collision>
   </link>
 
-  <joint name="caster_joint" type="continuous">
+  <gazebo reference="caster">
+    <mu1>0.0</mu1>
+    <mu2>0.0</mu2>
+    <slip1>${wheel_slip1}</slip1>
+    <slip2>${wheel_slip2}</slip2>
+  </gazebo>
+
+  <joint name="caster_joint" type="fixed">
     <origin xyz="${0.45 * scale} 0.0 ${0.076 * scale}" rpy="0.0 0.0 0.0"/>
-    <axis xyz="0 0 1"/>
     <parent link="base_footprint"/>
     <child link="caster"/>
   </joint>
