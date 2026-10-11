@@ -8,27 +8,32 @@ from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
+    ld = LaunchDescription()
+    bot_nav_pkg = get_package_share_directory('bot_nav')
     use_sim_time = DeclareLaunchArgument('use_sim_time', default_value='true')
+    ld.add_action(use_sim_time)
+    
     params_file = DeclareLaunchArgument(
         'params_file',
         default_value=os.path.join(
-            get_package_share_directory('bot_nav'), 'config', 'nav2_params.yaml'
+            bot_nav_pkg, 'config', 'nav2_params.yaml'
         ),
     )
+    ld.add_action(params_file)
+
     map_yaml_file = DeclareLaunchArgument(
         'map',
-        default_value=os.path.join(
-            get_package_share_directory('bot_nav'), 'map', 'bot_map.yaml'
-        ),
+        default_value=os.path.join(bot_nav_pkg, 'map', 'bot_map.yaml')
     )
+    ld.add_action(map_yaml_file)
+    rviz_config = os.path.join(bot_nav_pkg, 'config', 'nav.rviz')
     rviz_config_file = DeclareLaunchArgument(
         'rviz_config_file',
-        default_value=os.path.join(
-            get_package_share_directory('bot_nav'), 'config', 'nav.rviz'
-        ),
+        default_value=rviz_config,
         description='Full path to the RVIZ config file to use',
     )
-
+    ld.add_action(rviz_config_file)
+    
     sim_pkg = get_package_share_directory('bot_sim')
     sim_launch = os.path.join(sim_pkg, 'launch', 'bot_sim.launch.py')
     sim = IncludeLaunchDescription(
