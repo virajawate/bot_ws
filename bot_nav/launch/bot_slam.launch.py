@@ -1,5 +1,4 @@
 import os
-
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
@@ -8,20 +7,14 @@ from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
+    bot_nav = get_package_share_directory('bot_nav')
+    rviz_config = os.path.join(bot_nav, 'config', 'nav.rviz')
+    nav_config = os.path.join(bot_nav, 'config', 'nav2_params.yaml')
+    world_file = os.path.join(bot_nav, 'config', 'CylinderCube.sdf')
     use_sim_time = DeclareLaunchArgument('use_sim_time', default_value='true')
-    params_file = DeclareLaunchArgument(
-        'params_file',
-        default_value=os.path.join(
-            get_package_share_directory('bot_nav'), 'config', 'nav2_params.yaml'
-        ),
-    )
-    rviz_config_file = DeclareLaunchArgument(
-        'rviz_config_file',
-        default_value=os.path.join(
-            get_package_share_directory('bot_nav'), 'config', 'nav.rviz'
-        ),
-        description='Full path to the RVIZ config file to use',
-    )
+    params_file = DeclareLaunchArgument('params_file', default_value=nav_config,)
+    rviz_file = DeclareLaunchArgument('rviz_file', default_value=rviz_config)
+    world_file = DeclareLaunchArgument('world_file', default_value=world_file)
 
     sim_pkg = get_package_share_directory('bot_sim')
     sim_launch = os.path.join(sim_pkg, 'launch', 'bot_sim.launch.py')
@@ -29,7 +22,8 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(sim_launch),
         launch_arguments=[
             ('use_sim_time', LaunchConfiguration('use_sim_time'),), 
-            ('rviz_config_file', LaunchConfiguration('rviz_config_file'))
+            ('rviz_config_file', LaunchConfiguration('rviz_file')),
+            ('world_file', LaunchConfiguration('world_file'))
         ],
     )
 
@@ -45,4 +39,4 @@ def generate_launch_description():
             ('use_composition', 'False'),
         ],
     )
-    return LaunchDescription([use_sim_time, params_file, rviz_config_file, sim, navigation])
+    return LaunchDescription([use_sim_time, params_file, rviz_file, world_file, sim, navigation])
