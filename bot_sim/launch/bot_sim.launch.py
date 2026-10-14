@@ -12,14 +12,22 @@ def generate_launch_description():
 	ld = LaunchDescription()
 	pkg_bringup = get_package_share_directory('bot_bringup')
 	bringup_launch = os.path.join(pkg_bringup, 'launch', 'bot_bringup.launch.py')
+	world_file = os.path.join(pkg_bringup, 'worlds', 'testingMap.sdf')
+	rviz_config = os.path.join(pkg_bringup, 'config', 'bot.rviz')
 	use_sim_time = DeclareLaunchArgument('use_sim_time', default_value='true')
+	world_arg = DeclareLaunchArgument('world_arg', default_value=world_file)
+	rviz_config_file = DeclareLaunchArgument('rviz_config_file', default_value=rviz_config)
 	bringup = IncludeLaunchDescription(
 		PythonLaunchDescriptionSource(bringup_launch),
 		launch_arguments=[
 			('use_sim_time', LaunchConfiguration('use_sim_time')),
+			('world_arg', LaunchConfiguration('world_arg')),
+			('rviz_config_file', LaunchConfiguration('rviz_config_file')),
 		],
 	)
+	ld.add_action(world_arg)
 	ld.add_action(use_sim_time)
+	ld.add_action(rviz_config_file)
 	ld.add_action(bringup)
 
 	drive_bridge = Node(
