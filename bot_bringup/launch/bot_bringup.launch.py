@@ -23,7 +23,7 @@ def generate_launch_description():
     )
     ld.add_action(rviz_config_file)
     world_file_arg = DeclareLaunchArgument(
-        'world_file',
+        'world_arg',
         default_value=world_file,
         description='Full path to the world file to use',
     )
@@ -36,7 +36,7 @@ def generate_launch_description():
     ld.add_action(use_time)
     gz_args = DeclareLaunchArgument(
         'gz_args',
-        default_value=['-r ', LaunchConfiguration('world_file')],
+        default_value=['-r  ', LaunchConfiguration('world_arg')],
         description='Arguments passed to Ignition Gazebo',
     )
     ld.add_action(gz_args)
