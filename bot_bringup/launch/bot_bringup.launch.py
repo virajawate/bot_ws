@@ -83,6 +83,20 @@ def generate_launch_description():
         parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
     )
     ld.add_action(bot_spawn)
+    # bot_spawn2 = Node(
+    #     package='ros_gz_sim',
+    #     executable='create',
+    #     output='screen',
+    #     arguments=[
+    #         '-topic', '/robot_description', 
+    #         '-name', 'bot_two', 
+    #         '-x', '0',
+    #         '-y', '0.5',
+    #         '-z', '0.1',
+    #     ],
+    #     parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+    # )
+    # ld.add_action(bot_spawn2)
 
     bridge = Node(
         package='ros_gz_bridge',
