@@ -23,7 +23,7 @@ def generate_launch_description():
 
     map_yaml_file = DeclareLaunchArgument(
         'map',
-        default_value=os.path.join(bot_nav_pkg, 'map', 'bot_map.yaml')
+        default_value=os.path.join(bot_nav_pkg, 'config', 'batman.yaml')
     )
     ld.add_action(map_yaml_file)
     rviz_config = os.path.join(bot_nav_pkg, 'config', 'nav.rviz')
@@ -49,7 +49,7 @@ def generate_launch_description():
     navigation = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(nav2_launch),
         launch_arguments=[
-            ('slam', 'True'),
+            ('slam', 'False'),
             ('map', LaunchConfiguration('map')),
             ('use_sim_time', LaunchConfiguration('use_sim_time')),
             ('params_file', LaunchConfiguration('params_file')),
