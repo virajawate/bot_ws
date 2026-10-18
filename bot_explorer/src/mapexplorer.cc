@@ -4,10 +4,24 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <tf2/utils.h>
+#include <tf2/utils.hpp>
 
 MapExplorer::MapExplorer() : Node("MapExplorer"){
     map_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>("/map", 10, std::bind(&MapExplorer::MapHandler, this, _1));
+    explore_point_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("/explorer/points", 10);
+}
+
+void MapExplorer::ExplorerPointPub(double x, double y){
+    geometry_msgs::msg::PointStamped exp_pnt;
+
+    exp_pnt.header.stamp = this->now();
+    exp_pnt.header.frame_id = "map";
+    exp_pnt.point.x = x;
+    exp_pnt.point.y = y;
+    exp_pnt.point.z = 0;
+    explore_point_pub_->publish(exp_pnt);
+    RCLCPP_INFO(this->get_logger(), "Publishing point : (%.3f, %.3f)", x, y);
+
 }
 
 void MapExplorer::MapHandler(
@@ -37,7 +51,13 @@ void MapExplorer::MapHandler(
     const double resolution = info.resolution;
     const double origin_x = info.origin.position.x;
     const double origin_y = info.origin.position.y;
-    const double yaw = tf2::getYaw(info.origin.orientation);
+    // const double yaw = tf2::getYaw(info.origin.orientation);
+    const auto & q = info.origin.orientation;
+
+    const double yaw = std::atan2(
+        2.0 * (q.w * q.z + q.x * q.y),
+        1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+    );
 
     const double cos_yaw = std::cos(yaw);
     const double sin_yaw = std::sin(yaw);
@@ -120,6 +140,7 @@ void MapExplorer::MapHandler(
             this->get_logger(),
             "Unknown centroid: (%.3f, %.3f) m",
             unknown_x, unknown_y);
+        ExplorerPointPub(unknown_x, unknown_y);
     }
     else
     {
