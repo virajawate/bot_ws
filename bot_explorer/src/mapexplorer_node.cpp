@@ -5,7 +5,10 @@
 
 int main(int argc, char** argv){
     rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<MapExplorer>());
+    auto node = std::make_shared<MapExplorer>();
+    while(rclcpp::ok()){
+        rclcpp::spin(node);
+    }
     rclcpp::shutdown();
     return 0;
 }
