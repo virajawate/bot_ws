@@ -7,8 +7,10 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(rclcpp_action REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(nav2_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
@@ -17,7 +19,7 @@ add_library(${PROJECT_NAME}_lib src/mapexplorer.cc)
 target_include_directories(${PROJECT_NAME}_lib PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
-ament_target_dependencies(${PROJECT_NAME}_lib rclcpp nav_msgs tf2 geometry_msgs tf2_geometry_msgs)
+ament_target_dependencies(${PROJECT_NAME}_lib rclcpp nav_msgs tf2 geometry_msgs tf2_geometry_msgs rclcpp_action nav2_msgs)
 
 install(TARGETS ${PROJECT_NAME}_lib
   EXPORT ${PROJECT_NAME}Targets
