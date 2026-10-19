@@ -1,6 +1,9 @@
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
+#include <nav2_msgs/action/navigate_to_pose.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
+
 using std::placeholders::_1;
 
 class MapExplorer : public rclcpp::Node{

@@ -51,7 +51,6 @@ void MapExplorer::MapHandler(
     const double resolution = info.resolution;
     const double origin_x = info.origin.position.x;
     const double origin_y = info.origin.position.y;
-    // const double yaw = tf2::getYaw(info.origin.orientation);
     const auto & q = info.origin.orientation;
 
     const double yaw = std::atan2(
@@ -62,12 +61,10 @@ void MapExplorer::MapHandler(
     const double cos_yaw = std::cos(yaw);
     const double sin_yaw = std::sin(yaw);
 
-    for (std::size_t i = 0; i < map.size(); ++i)
-    {
+    for (std::size_t i = 0; i < map.size(); ++i){
         const int occupancy = static_cast<int>(map[i]);
 
-        if (occupancy == 0)
-        {
+        if (occupancy == 0){
             ++free_count;
             continue;
         }
@@ -75,8 +72,7 @@ void MapExplorer::MapHandler(
         const bool occupied = occupancy > 0 && occupancy <= 100;
         const bool unknown = occupancy == -1;
 
-        if (!occupied && !unknown)
-            continue;
+        if (!occupied && !unknown) continue;
 
         // Convert linear index to grid coordinates.
         const std::size_t cell_x = i % info.width;
@@ -101,6 +97,7 @@ void MapExplorer::MapHandler(
         }
         else
         {
+            ExplorerPointPub(x, y);
             ++unknown_count;
             unknown_x_sum += x;
             unknown_y_sum += y;
@@ -110,10 +107,10 @@ void MapExplorer::MapHandler(
     RCLCPP_INFO(
         this->get_logger(),
         "Cells: free=%zu, occupied=%zu, unknown=%zu",
-        free_count, occupied_count, unknown_count);
+        free_count, occupied_count, unknown_count
+    );
 
-    if (occupied_count > 0)
-    {
+    if (occupied_count > 0){
         const double occupied_x =
             occupied_x_sum / occupied_count;
         const double occupied_y =
@@ -135,7 +132,7 @@ void MapExplorer::MapHandler(
             unknown_x_sum / unknown_count;
         const double unknown_y =
             unknown_y_sum / unknown_count;
-
+        
         RCLCPP_INFO(
             this->get_logger(),
             "Unknown centroid: (%.3f, %.3f) m",
