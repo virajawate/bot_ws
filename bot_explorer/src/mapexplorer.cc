@@ -9,6 +9,7 @@
 MapExplorer::MapExplorer() : Node("MapExplorer"){
     map_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>("/map", 10, std::bind(&MapExplorer::MapHandler, this, _1));
     explore_point_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("/explorer/points", 10);
+    goal_client = rclcpp_action::create_client<NavigateToPose>(this, "navigate_to_pose");
 }
 
 void MapExplorer::ExplorerPointPub(double x, double y){
@@ -20,8 +21,52 @@ void MapExplorer::ExplorerPointPub(double x, double y){
     exp_pnt.point.y = y;
     exp_pnt.point.z = 0;
     explore_point_pub_->publish(exp_pnt);
+    SendGoal(x, y);
     RCLCPP_INFO(this->get_logger(), "Publishing point : (%.3f, %.3f)", x, y);
 
+}
+
+void MapExplorer::SendGoal(double x, double y){
+    if(!goal_client->action_server_is_ready()){
+        RCLCPP_WARN(this->get_logger(), "Nav2Goal is not ready yet.");
+        return;
+    }
+    NavigateToPose::Goal goal;
+    goal.pose.header.frame_id = "map";
+    goal.pose.header.stamp = this->now();
+    goal.pose.pose.position.x = x;
+    goal.pose.pose.position.y = y;
+    goal.pose.pose.position.z = 0;
+    goal.pose.pose.orientation.x = 0;
+    goal.pose.pose.orientation.y = 0;
+    goal.pose.pose.orientation.z = 0;
+    goal.pose.pose.orientation.w = 1;
+
+    auto options = rclcpp_action::Client<NavigateToPose>::SendGoalOptions();
+    options.goal_response_callback = [this](GoalHandlerNav::SharedPtr goal_handle){
+        if(!goal_handle){
+            RCLCPP_ERROR(this->get_logger(), "Nav2 rejected the goal.");
+        } else {
+            RCLCPP_INFO(this->get_logger(), "Nav2 accepted the goal.");
+        }
+    };
+    options.result_callback = [this](const GoalHandlerNav::WrappedResult &result){
+        switch(result.code){
+            case rclcpp_action::ResultCode::SUCCEEDED:
+                RCLCPP_INFO(this->get_logger(), "Navigation Succeeded.");
+                break;
+            case rclcpp_action::ResultCode::ABORTED:
+                RCLCPP_INFO(this->get_logger(), "Navigator Aborted.");
+                break;
+            case rclcpp_action::ResultCode::CANCELED:
+                RCLCPP_INFO(this->get_logger(),"Navigator Cancelled.");
+                break;
+            case rclcpp_action::ResultCode::UNKNOWN:
+                RCLCPP_INFO(this->get_logger(),"Navigator Unknown.");
+                break;
+        }
+    };
+    goal_client->async_send_goal(goal, options);
 }
 
 void MapExplorer::MapHandler(
@@ -97,7 +142,7 @@ void MapExplorer::MapHandler(
         }
         else
         {
-            ExplorerPointPub(x, y);
+            // ExplorerPointPub(x, y);
             ++unknown_count;
             unknown_x_sum += x;
             unknown_y_sum += y;
@@ -119,7 +164,8 @@ void MapExplorer::MapHandler(
         RCLCPP_INFO(
             this->get_logger(),
             "Occupied centroid: (%.3f, %.3f) m",
-            occupied_x, occupied_y);
+            occupied_x, occupied_y
+        );
     }
     else
     {

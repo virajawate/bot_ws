@@ -5,6 +5,8 @@
 #include <geometry_msgs/msg/point_stamped.hpp>
 
 using std::placeholders::_1;
+using NavigateToPose = nav2_msgs::action::NavigateToPose;
+using GoalHandlerNav = rclcpp_action::ClientGoalHandle<NavigateToPose>;
 
 class MapExplorer : public rclcpp::Node{
 public:
@@ -12,6 +14,8 @@ public:
 private:
     void MapHandler(nav_msgs::msg::OccupancyGrid::ConstSharedPtr map_msg);
     void ExplorerPointPub(double x, double y);
+    void SendGoal(double x, double y);
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
     rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr explore_point_pub_;
+    rclcpp_action::Client<NavigateToPose>::SharedPtr goal_client;
 };
