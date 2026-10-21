@@ -1,192 +1,642 @@
+
 #include "mapexplorer.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
-#include <cstddef>
-#include <cstdint>
+#include <functional>
 #include <limits>
-#include <tf2/utils.hpp>
+#include <utility>
 
-MapExplorer::MapExplorer() : Node("MapExplorer"){
-    map_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>("/map", 10, std::bind(&MapExplorer::MapHandler, this, _1));
-    explore_point_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("/explorer/points", 10);
-    goal_client = rclcpp_action::create_client<NavigateToPose>(this, "navigate_to_pose");
+#include "tf2/exceptions.hpp"
+#include "tf2/time.h"
+
+using namespace std::chrono_literals;
+
+MapExplorer::MapExplorer()
+    : Node("map_explorer")
+{
+    // Subscribe to the live occupancy grid.
+    map_sub_ = this->create_subscription<
+        nav_msgs::msg::OccupancyGrid>(
+        "/map",
+        rclcpp::QoS(1),
+        std::bind(
+            &MapExplorer::MapHandler,
+            this,
+            std::placeholders::_1));
+
+    // Publish the selected exploration target.
+    explore_point_pub_ =
+        this->create_publisher<
+            geometry_msgs::msg::PointStamped>(
+            "/explorer/points", 10);
+
+    // Nav2 NavigateToPose action client.
+    goal_client_ =
+        rclcpp_action::create_client<NavigateToPose>(
+            this, "navigate_to_pose");
+
+    // TF: map -> base_footprint.
+    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(
+        this->get_clock());
+
+    tf_listener_ =
+        std::make_shared<tf2_ros::TransformListener>(
+            *tf_buffer_);
+
+    // Task assignment runs independently of map reception.
+    exploration_timer_ = this->create_wall_timer(
+        1s,
+        std::bind(
+            &MapExplorer::ExplorationTick,
+            this));
+
+    RCLCPP_INFO(
+        this->get_logger(),
+        "MapExplorer initialized.");
 }
 
-void MapExplorer::ExplorerPointPub(double x, double y){
-    geometry_msgs::msg::PointStamped exp_pnt;
+// ------------------------------------------------------------
+// Map validation and reception
+// ------------------------------------------------------------
 
-    exp_pnt.header.stamp = this->now();
-    exp_pnt.header.frame_id = "map";
-    exp_pnt.point.x = x;
-    exp_pnt.point.y = y;
-    exp_pnt.point.z = 0;
-    explore_point_pub_->publish(exp_pnt);
-    SendGoal(x, y);
-    RCLCPP_INFO(this->get_logger(), "Publishing point : (%.3f, %.3f)", x, y);
+bool MapExplorer::IsValidMap(
+    const nav_msgs::msg::OccupancyGrid & map) const
+{
+    const auto & info = map.info;
 
-}
-
-void MapExplorer::SendGoal(double x, double y){
-    if(!goal_client->action_server_is_ready()){
-        RCLCPP_WARN(this->get_logger(), "Nav2Goal is not ready yet.");
-        return;
+    if (info.width == 0 ||
+        info.height == 0 ||
+        !std::isfinite(info.resolution) ||
+        info.resolution <= 0.0)
+    {
+        return false;
     }
-    NavigateToPose::Goal goal;
-    goal.pose.header.frame_id = "map";
-    goal.pose.header.stamp = this->now();
-    goal.pose.pose.position.x = x;
-    goal.pose.pose.position.y = y;
-    goal.pose.pose.position.z = 0;
-    goal.pose.pose.orientation.x = 0;
-    goal.pose.pose.orientation.y = 0;
-    goal.pose.pose.orientation.z = 0;
-    goal.pose.pose.orientation.w = 1;
 
-    auto options = rclcpp_action::Client<NavigateToPose>::SendGoalOptions();
-    options.goal_response_callback = [this](GoalHandlerNav::SharedPtr goal_handle){
-        if(!goal_handle){
-            RCLCPP_ERROR(this->get_logger(), "Nav2 rejected the goal.");
-        } else {
-            RCLCPP_INFO(this->get_logger(), "Nav2 accepted the goal.");
-        }
-    };
-    options.result_callback = [this](const GoalHandlerNav::WrappedResult &result){
-        switch(result.code){
-            case rclcpp_action::ResultCode::SUCCEEDED:
-                RCLCPP_INFO(this->get_logger(), "Navigation Succeeded.");
-                break;
-            case rclcpp_action::ResultCode::ABORTED:
-                RCLCPP_INFO(this->get_logger(), "Navigator Aborted.");
-                break;
-            case rclcpp_action::ResultCode::CANCELED:
-                RCLCPP_INFO(this->get_logger(),"Navigator Cancelled.");
-                break;
-            case rclcpp_action::ResultCode::UNKNOWN:
-                RCLCPP_INFO(this->get_logger(),"Navigator Unknown.");
-                break;
-        }
-    };
-    goal_client->async_send_goal(goal, options);
+    const std::size_t expected =
+        static_cast<std::size_t>(info.width) *
+        static_cast<std::size_t>(info.height);
+
+    if (map.data.size() != expected)
+        return false;
+
+    const auto & q = info.origin.orientation;
+
+    if (!std::isfinite(info.origin.position.x) ||
+        !std::isfinite(info.origin.position.y) ||
+        !std::isfinite(q.x) ||
+        !std::isfinite(q.y) ||
+        !std::isfinite(q.z) ||
+        !std::isfinite(q.w))
+    {
+        return false;
+    }
+
+    const double q_norm =
+        q.x * q.x + q.y * q.y +
+        q.z * q.z + q.w * q.w;
+
+    return std::isfinite(q_norm) && q_norm > 1e-12;
 }
 
 void MapExplorer::MapHandler(
-    nav_msgs::msg::OccupancyGrid::ConstSharedPtr map_msg)
+    nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg)
 {
-    const auto & map = map_msg->data;
-    const auto & info = map_msg->info;
-
-    if (info.width == 0 || info.height == 0 ||
-        info.resolution <= 0.0 ||
-        map.size() != static_cast<std::size_t>(info.width) * info.height)
+    if (!msg || !IsValidMap(*msg))
     {
-        RCLCPP_WARN(this->get_logger(), "Invalid occupancy grid");
+        RCLCPP_WARN_THROTTLE(
+            get_logger(),
+            *get_clock(),
+            3000,
+            "Ignoring invalid occupancy grid.");
         return;
     }
 
-    std::size_t free_count = 0;
-    std::size_t occupied_count = 0;
-    std::size_t unknown_count = 0;
+    latest_map_ = std::move(msg);
+    map_received_ = true;
 
-    double occupied_x_sum = 0.0;
-    double occupied_y_sum = 0.0;
+    if (state_ == State::WAITING_FOR_MAP ||
+        state_ == State::COMPLETE)
+    {
+        state_ = State::IDLE;
+    }
+}
 
-    double unknown_x_sum = 0.0;
-    double unknown_y_sum = 0.0;
+// ------------------------------------------------------------
+// Frontier detection
+// ------------------------------------------------------------
+
+std::vector<MapExplorer::Frontier>
+MapExplorer::DetectFrontiers(
+    const nav_msgs::msg::OccupancyGrid & map) const
+{
+    std::vector<Frontier> frontiers;
+
+    const auto & info = map.info;
+
+    const std::size_t width = info.width;
+    const std::size_t height = info.height;
 
     const double resolution = info.resolution;
+
     const double origin_x = info.origin.position.x;
     const double origin_y = info.origin.position.y;
+
     const auto & q = info.origin.orientation;
 
+    // Extract the origin orientation's yaw.
     const double yaw = std::atan2(
         2.0 * (q.w * q.z + q.x * q.y),
-        1.0 - 2.0 * (q.y * q.y + q.z * q.z)
-    );
+        1.0 - 2.0 * (q.y * q.y + q.z * q.z));
 
     const double cos_yaw = std::cos(yaw);
     const double sin_yaw = std::sin(yaw);
 
-    for (std::size_t i = 0; i < map.size(); ++i){
-        const int occupancy = static_cast<int>(map[i]);
+    const auto index =
+        [width](std::size_t x, std::size_t y)
+        {
+            return y * width + x;
+        };
 
-        if (occupancy == 0){
-            ++free_count;
+    const auto is_free =
+        [&](std::size_t x, std::size_t y)
+        {
+            const int value =
+                static_cast<int>(map.data[index(x, y)]);
+
+            return value >= 0 &&
+                   value <= free_threshold_;
+        };
+
+    const auto is_unknown =
+        [&](std::size_t x, std::size_t y)
+        {
+            return map.data[index(x, y)] == -1;
+        };
+
+    // 4-connected neighborhood.
+    constexpr std::array<int, 4> dx = {-1, 1, 0, 0};
+    constexpr std::array<int, 4> dy = {0, 0, -1, 1};
+
+    for (std::size_t y = 0; y < height; ++y)
+    {
+        for (std::size_t x = 0; x < width; ++x)
+        {
+            // A frontier target must be known free space.
+            if (!is_free(x, y))
+                continue;
+
+            bool is_frontier = false;
+
+            for (std::size_t k = 0; k < dx.size(); ++k)
+            {
+                const int nx =
+                    static_cast<int>(x) + dx[k];
+
+                const int ny =
+                    static_cast<int>(y) + dy[k];
+
+                // Explicitly handle map boundaries.
+                if (nx < 0 || ny < 0 ||
+                    nx >= static_cast<int>(width) ||
+                    ny >= static_cast<int>(height))
+                {
+                    continue;
+                }
+
+                if (is_unknown(
+                        static_cast<std::size_t>(nx),
+                        static_cast<std::size_t>(ny)))
+                {
+                    is_frontier = true;
+                    break;
+                }
+            }
+
+            if (!is_frontier)
+                continue;
+
+            // Cell center in grid-local coordinates.
+            const double local_x =
+                (static_cast<double>(x) + 0.5) * resolution;
+
+            const double local_y =
+                (static_cast<double>(y) + 0.5) * resolution;
+
+            Frontier frontier;
+
+            // Transform into the map frame.
+            frontier.x =
+                origin_x +
+                local_x * cos_yaw -
+                local_y * sin_yaw;
+
+            frontier.y =
+                origin_y +
+                local_x * sin_yaw +
+                local_y * cos_yaw;
+
+            frontiers.push_back(frontier);
+        }
+    }
+
+    return frontiers;
+}
+
+// ------------------------------------------------------------
+// Robot pose
+// ------------------------------------------------------------
+
+bool MapExplorer::GetRobotPose(
+    double & x, double & y)
+{
+    try
+    {
+        const auto transform =
+            tf_buffer_->lookupTransform(
+                "map",
+                "base_footprint",
+                tf2::TimePointZero);
+
+        x = transform.transform.translation.x;
+        y = transform.transform.translation.y;
+
+        return std::isfinite(x) && std::isfinite(y);
+    }
+    catch (const tf2::TransformException & ex)
+    {
+        RCLCPP_WARN_THROTTLE(
+            get_logger(),
+            *get_clock(),
+            3000,
+            "Robot pose unavailable: %s",
+            ex.what());
+
+        return false;
+    }
+}
+
+// ------------------------------------------------------------
+// Task selection
+// ------------------------------------------------------------
+
+double MapExplorer::Distance(
+    double x1, double y1,
+    double x2, double y2)
+{
+    return std::hypot(x2 - x1, y2 - y1);
+}
+
+void MapExplorer::PruneFailedFrontiers()
+{
+    const auto now =
+        std::chrono::steady_clock::now();
+
+    // Expire failed targets after one minute.
+    constexpr auto failure_memory = 60s;
+
+    failed_frontiers_.erase(
+        std::remove_if(
+            failed_frontiers_.begin(),
+            failed_frontiers_.end(),
+            [&](const FailedFrontier & failed)
+            {
+                return now - failed.failed_at >
+                       failure_memory;
+            }),
+        failed_frontiers_.end());
+}
+
+bool MapExplorer::IsRecentlyFailed(
+    const Frontier & frontier)
+{
+    PruneFailedFrontiers();
+
+    for (const auto & failed : failed_frontiers_)
+    {
+        if (Distance(
+                frontier.x, frontier.y,
+                failed.frontier.x,
+                failed.frontier.y) < retry_distance_)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void MapExplorer::RecordFailedFrontier(
+    const Frontier & frontier)
+{
+    failed_frontiers_.push_back(
+        FailedFrontier{
+            frontier,
+            std::chrono::steady_clock::now()});
+
+    PruneFailedFrontiers();
+}
+
+bool MapExplorer::SelectFrontier(
+    const std::vector<Frontier> & frontiers,
+    double robot_x,
+    double robot_y,
+    Frontier & selected)
+{
+    bool found = false;
+
+    double best_score =
+        std::numeric_limits<double>::infinity();
+
+    for (const auto & frontier : frontiers)
+    {
+        const double distance =
+            Distance(
+                robot_x, robot_y,
+                frontier.x, frontier.y);
+
+        // Reject targets too close to the robot.
+        if (distance < min_frontier_separation_)
             continue;
-        }
 
-        const bool occupied = occupancy > 0 && occupancy <= 100;
-        const bool unknown = occupancy == -1;
+        // Do not immediately retry a failed target.
+        if (IsRecentlyFailed(frontier))
+            continue;
 
-        if (!occupied && !unknown) continue;
+        // Baseline scoring: nearest frontier first.
+        // Path cost and information gain can be added later.
+        const double score = distance;
 
-        // Convert linear index to grid coordinates.
-        const std::size_t cell_x = i % info.width;
-        const std::size_t cell_y = i / info.width;
-
-        // Calculate cell center in the grid's local coordinates.
-        const double local_x = (cell_x + 0.5) * resolution;
-        const double local_y = (cell_y + 0.5) * resolution;
-
-        // Transform cell center into the map frame.
-        const double x =
-            origin_x + local_x * cos_yaw - local_y * sin_yaw;
-
-        const double y =
-            origin_y + local_x * sin_yaw + local_y * cos_yaw;
-
-        if (occupied)
+        if (score < best_score)
         {
-            ++occupied_count;
-            occupied_x_sum += x;
-            occupied_y_sum += y;
+            best_score = score;
+            selected = frontier;
+            selected.score = score;
+            found = true;
         }
-        else
+    }
+
+    return found;
+}
+
+// ------------------------------------------------------------
+// Exploration state machine
+// ------------------------------------------------------------
+
+void MapExplorer::ExplorationTick()
+{
+    if (!map_received_ || !latest_map_)
+        return;
+
+    // A task must not be replaced while its request
+    // is pending or Nav2 is executing it.
+    if (goal_request_pending_ ||
+        active_goal_ ||
+        state_ == State::NAVIGATING)
+    {
+        return;
+    }
+
+    if (state_ == State::COMPLETE)
+        return;
+
+    if (state_ == State::RETRY_WAIT)
+    {
+        if (std::chrono::steady_clock::now() <
+            next_retry_time_)
         {
-            // ExplorerPointPub(x, y);
-            ++unknown_count;
-            unknown_x_sum += x;
-            unknown_y_sum += y;
+            return;
         }
+
+        state_ = State::IDLE;
+    }
+
+    if (!goal_client_->action_server_is_ready())
+    {
+        RCLCPP_WARN_THROTTLE(
+            get_logger(),
+            *get_clock(),
+            5000,
+            "Waiting for Nav2 navigate_to_pose server.");
+
+        return;
+    }
+
+    AssignNextGoal();
+}
+
+void MapExplorer::AssignNextGoal()
+{
+    if (!latest_map_ ||
+        !IsValidMap(*latest_map_))
+    {
+        return;
+    }
+
+    double robot_x = 0.0;
+    double robot_y = 0.0;
+
+    if (!GetRobotPose(robot_x, robot_y))
+        return;
+
+    const auto frontiers =
+        DetectFrontiers(*latest_map_);
+
+    RCLCPP_DEBUG(
+        get_logger(),
+        "Detected %zu frontier cells.",
+        frontiers.size());
+
+    Frontier selected;
+
+    if (!SelectFrontier(
+            frontiers,
+            robot_x,
+            robot_y,
+            selected))
+    {
+        state_ = State::COMPLETE;
+
+        RCLCPP_INFO(
+            get_logger(),
+            "No eligible frontier. Waiting for a map update.");
+
+        return;
     }
 
     RCLCPP_INFO(
-        this->get_logger(),
-        "Cells: free=%zu, occupied=%zu, unknown=%zu",
-        free_count, occupied_count, unknown_count
-    );
+        get_logger(),
+        "Selected frontier: x=%.2f, y=%.2f, "
+        "distance=%.2f m",
+        selected.x,
+        selected.y,
+        selected.score);
 
-    if (occupied_count > 0){
-        const double occupied_x =
-            occupied_x_sum / occupied_count;
-        const double occupied_y =
-            occupied_y_sum / occupied_count;
+    SendGoal(selected);
+}
 
-        RCLCPP_INFO(
-            this->get_logger(),
-            "Occupied centroid: (%.3f, %.3f) m",
-            occupied_x, occupied_y
-        );
-    }
-    else
+// ------------------------------------------------------------
+// Nav2 goal submission
+// ------------------------------------------------------------
+
+void MapExplorer::SendGoal(
+    const Frontier & frontier)
+{
+    if (goal_request_pending_ || active_goal_)
+        return;
+
+    if (!goal_client_->action_server_is_ready())
+        return;
+
+    NavigateToPose::Goal goal;
+
+    goal.pose.header.frame_id = "map";
+    goal.pose.header.stamp = this->now();
+
+    goal.pose.pose.position.x = frontier.x;
+    goal.pose.pose.position.y = frontier.y;
+    goal.pose.pose.position.z = 0.0;
+
+    // Identity quaternion: zero yaw.
+    goal.pose.pose.orientation.x = 0.0;
+    goal.pose.pose.orientation.y = 0.0;
+    goal.pose.pose.orientation.z = 0.0;
+    goal.pose.pose.orientation.w = 1.0;
+
+    current_frontier_ = frontier;
+
+    goal_request_pending_ = true;
+    state_ = State::NAVIGATING;
+
+    PublishExplorationPoint(frontier.x, frontier.y);
+
+    auto options =
+        rclcpp_action::Client<
+            NavigateToPose>::SendGoalOptions();
+
+    options.goal_response_callback =
+        [this](GoalHandleNav::SharedPtr goal_handle)
+        {
+            HandleGoalResponse(goal_handle);
+        };
+
+    options.result_callback =
+        [this](
+            const GoalHandleNav::WrappedResult & result)
+        {
+            HandleResult(result);
+        };
+
+    goal_client_->async_send_goal(goal, options);
+}
+
+void MapExplorer::HandleGoalResponse(
+    GoalHandleNav::SharedPtr goal_handle)
+{
+    goal_request_pending_ = false;
+
+    if (!goal_handle)
     {
-        RCLCPP_INFO(this->get_logger(), "No occupied cells");
+        RCLCPP_ERROR(
+            get_logger(),
+            "Nav2 rejected the exploration goal.");
+
+        RecordFailedFrontier(current_frontier_);
+
+        next_retry_time_ =
+            std::chrono::steady_clock::now() +
+            retry_delay_;
+
+        state_ = State::RETRY_WAIT;
+
+        return;
     }
 
-    if (unknown_count > 0)
+    active_goal_ = goal_handle;
+
+    RCLCPP_INFO(
+        get_logger(),
+        "Nav2 accepted the exploration goal.");
+}
+
+void MapExplorer::HandleResult(
+    const GoalHandleNav::WrappedResult & result)
+{
+    active_goal_.reset();
+    goal_request_pending_ = false;
+
+    switch (result.code)
     {
-        const double unknown_x =
-            unknown_x_sum / unknown_count;
-        const double unknown_y =
-            unknown_y_sum / unknown_count;
-        
-        RCLCPP_INFO(
-            this->get_logger(),
-            "Unknown centroid: (%.3f, %.3f) m",
-            unknown_x, unknown_y);
-        ExplorerPointPub(unknown_x, unknown_y);
+        case rclcpp_action::ResultCode::SUCCEEDED:
+        {
+            RCLCPP_INFO(
+                get_logger(),
+                "Exploration goal succeeded.");
+
+            state_ = State::IDLE;
+            break;
+        }
+
+        case rclcpp_action::ResultCode::ABORTED:
+        {
+            RCLCPP_WARN(
+                get_logger(),
+                "Navigation aborted. Retiring this target temporarily.");
+
+            RecordFailedFrontier(current_frontier_);
+
+            next_retry_time_ =
+                std::chrono::steady_clock::now() +
+                retry_delay_;
+
+            state_ = State::RETRY_WAIT;
+            break;
+        }
+
+        case rclcpp_action::ResultCode::CANCELED:
+        {
+            RCLCPP_INFO(
+                get_logger(),
+                "Navigation canceled.");
+
+            state_ = State::IDLE;
+            break;
+        }
+
+        default:
+        {
+            RCLCPP_WARN(
+                get_logger(),
+                "Navigation returned an unknown result.");
+
+            RecordFailedFrontier(current_frontier_);
+
+            next_retry_time_ =
+                std::chrono::steady_clock::now() +
+                retry_delay_;
+
+            state_ = State::RETRY_WAIT;
+            break;
+        }
     }
-    else
-    {
-        RCLCPP_INFO(this->get_logger(), "No unknown cells");
-    }
+}
+
+// ------------------------------------------------------------
+// Exploration target publisher
+// ------------------------------------------------------------
+
+void MapExplorer::PublishExplorationPoint(
+    double x, double y)
+{
+    geometry_msgs::msg::PointStamped point;
+
+    point.header.stamp = this->now();
+    point.header.frame_id = "map";
+
+    point.point.x = x;
+    point.point.y = y;
+    point.point.z = 0.0;
+
+    explore_point_pub_->publish(point);
 }
