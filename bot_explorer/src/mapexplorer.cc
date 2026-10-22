@@ -32,10 +32,10 @@ MapExplorer::MapExplorer()
             geometry_msgs::msg::PointStamped>(
             "/explorer/points", 10);
 
-    // Nav2 NavigateToPose action client.
-    goal_client_ =
-        rclcpp_action::create_client<NavigateToPose>(
-            this, "navigate_to_pose");
+    // Nav2 GoalPose.
+    goal_pose_pub_ =
+        this->create_publisher<geometry_msgs::msg::PoseStamped>(
+            "/goal_pose", 10);
 
     // TF: map -> base_footprint.
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(
@@ -51,7 +51,10 @@ MapExplorer::MapExplorer()
         std::bind(
             &MapExplorer::ExplorationTick,
             this));
-
+    unknown_marker_pub_ =
+        this->create_publisher<
+            visualization_msgs::msg::MarkerArray>(
+            "/explorer/unknown_markers", 10);
     RCLCPP_INFO(
         this->get_logger(),
         "MapExplorer initialized.");
@@ -116,6 +119,7 @@ void MapExplorer::MapHandler(
     latest_map_ = std::move(msg);
     map_received_ = true;
 
+    PublishUnknownVisualization(*latest_map_);
     if (state_ == State::WAITING_FOR_MAP ||
         state_ == State::COMPLETE)
     {
@@ -383,44 +387,21 @@ bool MapExplorer::SelectFrontier(
 // ------------------------------------------------------------
 // Exploration state machine
 // ------------------------------------------------------------
-
-void MapExplorer::ExplorationTick()
-{
+void MapExplorer::ExplorationTick(){
     if (!map_received_ || !latest_map_)
         return;
 
-    // A task must not be replaced while its request
-    // is pending or Nav2 is executing it.
-    if (goal_request_pending_ ||
-        active_goal_ ||
-        state_ == State::NAVIGATING)
-    {
-        return;
-    }
-
-    if (state_ == State::COMPLETE)
+    if (state_ == State::NAVIGATING ||
+        state_ == State::COMPLETE)
         return;
 
     if (state_ == State::RETRY_WAIT)
     {
         if (std::chrono::steady_clock::now() <
             next_retry_time_)
-        {
             return;
-        }
 
         state_ = State::IDLE;
-    }
-
-    if (!goal_client_->action_server_is_ready())
-    {
-        RCLCPP_WARN_THROTTLE(
-            get_logger(),
-            *get_clock(),
-            5000,
-            "Waiting for Nav2 navigate_to_pose server.");
-
-        return;
     }
 
     AssignNextGoal();
@@ -479,56 +460,36 @@ void MapExplorer::AssignNextGoal()
 // ------------------------------------------------------------
 // Nav2 goal submission
 // ------------------------------------------------------------
+void MapExplorer::SendGoal(const Frontier & frontier){
+    geometry_msgs::msg::PoseStamped goal;
 
-void MapExplorer::SendGoal(
-    const Frontier & frontier)
-{
-    if (goal_request_pending_ || active_goal_)
-        return;
+    goal.header.frame_id = "map";
+    goal.header.stamp = this->now();
 
-    if (!goal_client_->action_server_is_ready())
-        return;
+    goal.pose.position.x = frontier.x;
+    goal.pose.position.y = frontier.y;
+    goal.pose.position.z = 0.0;
 
-    NavigateToPose::Goal goal;
-
-    goal.pose.header.frame_id = "map";
-    goal.pose.header.stamp = this->now();
-
-    goal.pose.pose.position.x = frontier.x;
-    goal.pose.pose.position.y = frontier.y;
-    goal.pose.pose.position.z = 0.0;
-
-    // Identity quaternion: zero yaw.
-    goal.pose.pose.orientation.x = 0.0;
-    goal.pose.pose.orientation.y = 0.0;
-    goal.pose.pose.orientation.z = 0.0;
-    goal.pose.pose.orientation.w = 1.0;
+    goal.pose.orientation.x = 0.0;
+    goal.pose.orientation.y = 0.0;
+    goal.pose.orientation.z = 0.0;
+    goal.pose.orientation.w = 1.0;
 
     current_frontier_ = frontier;
 
-    goal_request_pending_ = true;
-    state_ = State::NAVIGATING;
-
     PublishExplorationPoint(frontier.x, frontier.y);
+    goal_pose_pub_->publish(goal);
 
-    auto options =
-        rclcpp_action::Client<
-            NavigateToPose>::SendGoalOptions();
+    RCLCPP_INFO(
+        get_logger(),
+        "Published exploration goal to /goal_pose: "
+        "x=%.2f, y=%.2f",
+        frontier.x,
+        frontier.y);
 
-    options.goal_response_callback =
-        [this](GoalHandleNav::SharedPtr goal_handle)
-        {
-            HandleGoalResponse(goal_handle);
-        };
-
-    options.result_callback =
-        [this](
-            const GoalHandleNav::WrappedResult & result)
-        {
-            HandleResult(result);
-        };
-
-    goal_client_->async_send_goal(goal, options);
+    // Topic publishing provides no navigation result callback.
+    // Avoid repeatedly publishing the same goal every timer tick.
+    state_ = State::NAVIGATING;
 }
 
 void MapExplorer::HandleGoalResponse(
@@ -639,4 +600,139 @@ void MapExplorer::PublishExplorationPoint(
     point.point.z = 0.0;
 
     explore_point_pub_->publish(point);
+}
+
+void MapExplorer::PublishUnknownVisualization(
+    const nav_msgs::msg::OccupancyGrid & map)
+{
+    visualization_msgs::msg::MarkerArray markers;
+
+    const auto & info = map.info;
+
+    const int width = static_cast<int>(info.width);
+    const int height = static_cast<int>(info.height);
+    const double resolution = info.resolution;
+
+    const auto & origin = info.origin.position;
+    const auto & q = info.origin.orientation;
+
+    const double yaw = std::atan2(
+        2.0 * (q.w * q.z + q.x * q.y),
+        1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+
+    const double cos_yaw = std::cos(yaw);
+    const double sin_yaw = std::sin(yaw);
+
+    auto toMap = [&](double lx, double ly)
+    {
+        geometry_msgs::msg::Point p;
+        p.x = origin.x + lx * cos_yaw - ly * sin_yaw;
+        p.y = origin.y + lx * sin_yaw + ly * cos_yaw;
+        p.z = 0.05;
+        return p;
+    };
+
+    visualization_msgs::msg::Marker unknown;
+    unknown.header.frame_id = map.header.frame_id;
+    unknown.header.stamp = this->now();
+    unknown.ns = "unknown_cells";
+    unknown.id = 0;
+    unknown.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+    unknown.action = visualization_msgs::msg::Marker::ADD;
+
+    unknown.pose.orientation.w = 1.0;
+    unknown.scale.x = resolution * 0.25;
+    unknown.scale.y = resolution * 0.25;
+    unknown.scale.z = resolution * 0.25;
+
+    unknown.color.r = 1.0;
+    unknown.color.g = 0.1;
+    unknown.color.b = 0.1;
+    unknown.color.a = 0.9;
+
+    visualization_msgs::msg::Marker sides;
+    sides.header = unknown.header;
+    sides.ns = "unknown_side_centers";
+    sides.id = 1;
+    sides.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+    sides.action = visualization_msgs::msg::Marker::ADD;
+
+    sides.pose.orientation.w = 1.0;
+    sides.scale.x = resolution * 0.18;
+    sides.scale.y = resolution * 0.18;
+    sides.scale.z = resolution * 0.18;
+
+    sides.color.r = 0.1;
+    sides.color.g = 1.0;
+    sides.color.b = 0.1;
+    sides.color.a = 1.0;
+
+    constexpr int dx[] = {-1, 1, 0, 0};
+    constexpr int dy[] = {0, 0, -1, 1};
+
+    const auto index = [width](int x, int y)
+    {
+        return static_cast<std::size_t>(y) *
+                   static_cast<std::size_t>(width) +
+               static_cast<std::size_t>(x);
+    };
+
+    auto isUnknown = [&](int x, int y)
+    {
+        return map.data[index(x, y)] == -1;
+    };
+
+    auto isFree = [&](int x, int y)
+    {
+        const int value = map.data[index(x, y)];
+        return value >= 0 && value <= free_threshold_;
+    };
+
+    for (int y = 0; y < height; ++y)
+    {
+        for (int x = 0; x < width; ++x)
+        {
+            if (isUnknown(x, y))
+            {
+                // Center of every unknown occupancy-grid cell.
+                unknown.points.push_back(
+                    toMap(
+                        (x + 0.5) * resolution,
+                        (y + 0.5) * resolution));
+            }
+
+            if (!isFree(x, y))
+                continue;
+
+            // Find each side of this free cell that borders
+            // an unknown cell.
+            for (int k = 0; k < 4; ++k)
+            {
+                const int nx = x + dx[k];
+                const int ny = y + dy[k];
+
+                if (nx < 0 || nx >= width ||
+                    ny < 0 || ny >= height)
+                {
+                    continue;
+                }
+
+                if (!isUnknown(nx, ny))
+                    continue;
+
+                // Midpoint of the shared free/unknown edge.
+                const double lx =
+                    (x + 0.5 + 0.5 * dx[k]) * resolution;
+                const double ly =
+                    (y + 0.5 + 0.5 * dy[k]) * resolution;
+
+                sides.points.push_back(toMap(lx, ly));
+            }
+        }
+    }
+
+    markers.markers.push_back(unknown);
+    markers.markers.push_back(sides);
+
+    unknown_marker_pub_->publish(markers);
 }

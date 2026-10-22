@@ -13,7 +13,8 @@
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "geometry_msgs/msg/point_stamped.hpp"
 #include "nav2_msgs/action/navigate_to_pose.hpp"
-
+#include <visualization_msgs/msg/marker_array.hpp>
+#include <visualization_msgs/msg/marker.hpp>
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 
@@ -96,6 +97,9 @@ private:
     static double Distance(
         double x1, double y1,
         double x2, double y2);
+    
+    void PublishUnknownVisualization(
+        const nav_msgs::msg::OccupancyGrid & map);
 
     // ROS interfaces
     rclcpp::Subscription<
@@ -104,9 +108,14 @@ private:
     rclcpp::Publisher<
         geometry_msgs::msg::PointStamped>::SharedPtr
         explore_point_pub_;
-
-    rclcpp_action::Client<
-        NavigateToPose>::SharedPtr goal_client_;
+    
+    rclcpp::Publisher<
+        visualization_msgs::msg::MarkerArray>::SharedPtr
+        unknown_marker_pub_;
+    
+    rclcpp::Publisher<
+        geometry_msgs::msg::PoseStamped>::SharedPtr 
+        goal_pose_pub_;
 
     rclcpp::TimerBase::SharedPtr exploration_timer_;
 
