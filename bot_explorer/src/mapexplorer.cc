@@ -19,8 +19,7 @@ MapExplorer::MapExplorer()
     // Subscribe to the live occupancy grid.
     map_sub_ = this->create_subscription<
         nav_msgs::msg::OccupancyGrid>(
-        "/map",
-        rclcpp::QoS(1),
+        "/map",1,
         std::bind(
             &MapExplorer::MapHandler,
             this,
