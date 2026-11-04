@@ -29,6 +29,7 @@ public:
     std::vector<std::vector<Frontier>> detect_frontiers(const nav_msgs::msg::OccupancyGrid & map);
     std::vector<Frontier> process_frontiers(const std::vector<std::vector<Frontier>> & clusters);
     void publish_frontiers(const std::vector<Frontier> & frontiers);
+    void process_frontiers(const std::vector<Frontier> & frontiers);
 private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;

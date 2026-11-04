@@ -172,3 +172,14 @@ void MapExplorer::publish_frontiers(const std::vector<Frontier> & frontiers) {
     }
     marker_pub_->publish(marker_array);
 }
+
+void MapExplorer::process_frontiers(const std::vector<Frontier> & frontiers) {
+    if (frontiers.empty()) {
+        RCLCPP_INFO(this->get_logger(), "No frontiers to process.");
+        return;
+    }
+    RCLCPP_INFO(this->get_logger(), "Processing %zu frontiers.", frontiers.size());
+    for (const auto & frontier : frontiers) {
+        RCLCPP_INFO(this->get_logger(), "Frontier at cell (%d, %d)", frontier.x, frontier.y);
+    }
+}
