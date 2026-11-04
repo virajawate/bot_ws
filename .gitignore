@@ -3,3 +3,4 @@ build/
 install/
 log/
 *_v*.cc
+*_v*.h
