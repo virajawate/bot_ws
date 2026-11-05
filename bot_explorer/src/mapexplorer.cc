@@ -9,13 +9,9 @@ MapExplorer::MapExplorer() : rclcpp::Node("map_explorer") {
 }
 
 void MapExplorer::map_cb(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
-    // if(map_received_) {
-    //     RCLCPP_INFO(this->get_logger(), "Map already received, ignoring new map.");
-    //     return;
-    // }
     latest_map_ = msg;
     map_received_ = true;
-    std::vector<std::vector<Frontier>> clusters; // Placeholder for frontier detection logic
+    std::vector<std::vector<Frontier>> clusters;
     if (is_valid_map(*latest_map_)) {
         RCLCPP_INFO(this->get_logger(), "Received a valid map.");
         clusters = detect_frontiers(*latest_map_);
@@ -107,29 +103,28 @@ std::vector<std::vector<Frontier>> MapExplorer::detect_frontiers(const nav_msgs:
 
 std::vector<Frontier> MapExplorer::process_frontiers(const std::vector<std::vector<Frontier>> & clusters) {
     std::vector<Frontier> frontiers;
+    std::vector<int> cluster_n;
     const int n = static_cast<int>(clusters.size());
     if(clusters.empty()){
         RCLCPP_INFO(this->get_logger(), "No frontiers detected.");
-        publish_frontiers(frontiers);  // Publish empty marker array
+        publish_frontiers(frontiers, cluster_n);  // Publish empty marker array
         return clusters.empty() ? frontiers : clusters[0];  // Return empty if no clusters
     }
     for(auto cluster : clusters){
-        int n = cluster.size();
-        RCLCPP_INFO(this->get_logger(), "Cluster size: %d", n);
         if (n == 0 || n <= 8) continue;
-        // search for the median of the cluster
         std::nth_element(cluster.begin(), cluster.begin() + n / 2, cluster.end(), [](const Frontier & a, const Frontier & b) {
             return a.x < b.x;
         });
         Frontier median = cluster[n / 2];
         frontiers.push_back(median);
+        cluster_n.push_back(n);
     }
-    publish_frontiers(frontiers);
+    publish_frontiers(frontiers, cluster_n);
     process_frontiers(frontiers);
     return frontiers;
 }
 
-void MapExplorer::publish_frontiers(const std::vector<Frontier> & frontiers) {
+Frontier MapExplorer::publish_frontiers(const std::vector<Frontier> & frontiers, const std::vector<int> & cluster_n) {
     if (!latest_map_) return;
     const auto & info = latest_map_->info;
     const double res = info.resolution;
@@ -147,8 +142,17 @@ void MapExplorer::publish_frontiers(const std::vector<Frontier> & frontiers) {
     marker_array.markers.push_back(clear);
 
     int id = 0;
-    for (const auto & frontier : frontiers) {
-        const double lx = (frontier.x + 0.5) * res;  // cell centre, metres
+    int bigger_cluster_n = 0;
+    int bigger_cluster_index = -1;
+    for (size_t i = 0; i < frontiers.size(); ++i) {
+        const auto & frontier = frontiers[i];
+        const int cluster_size = cluster_n[i];
+        if (cluster_size > bigger_cluster_n) {
+            bigger_cluster_n = cluster_size;
+            bigger_cluster_index = i;
+        }
+        RCLCPP_INFO(this->get_logger(), "Frontier %zu: cell (%d, %d), cluster size: %d", i, frontier.x, frontier.y, cluster_size);
+        const double lx = (frontier.x + 0.5) * res;
         const double ly = (frontier.y + 0.5) * res;
         const double wx = info.origin.position.x + c * lx - s * ly;
         const double wy = info.origin.position.y + s * lx + c * ly;
@@ -169,8 +173,12 @@ void MapExplorer::publish_frontiers(const std::vector<Frontier> & frontiers) {
         RCLCPP_INFO(this->get_logger(), "Frontier cell (%d, %d) -> world (%.2f, %.2f)",
                     frontier.x, frontier.y, wx, wy);
         marker_array.markers.push_back(marker);
+        // Navigate to the biggest cluster frontiers[bigger_cluster_index]
     }
+    RCLCPP_INFO(this->get_logger(), "Biggest cluster index: %d, size: %d", bigger_cluster_index, bigger_cluster_n);
+
     marker_pub_->publish(marker_array);
+    return bigger_cluster_index != -1 ? frontiers[bigger_cluster_index] : Frontier{-1, -1};
 }
 
 void MapExplorer::process_frontiers(const std::vector<Frontier> & frontiers) {

@@ -28,7 +28,7 @@ public:
     bool is_valid_map(const nav_msgs::msg::OccupancyGrid & map);
     std::vector<std::vector<Frontier>> detect_frontiers(const nav_msgs::msg::OccupancyGrid & map);
     std::vector<Frontier> process_frontiers(const std::vector<std::vector<Frontier>> & clusters);
-    void publish_frontiers(const std::vector<Frontier> & frontiers);
+    Frontier publish_frontiers(const std::vector<Frontier> & frontiers, const std::vector<int> & cluster_n);
     void process_frontiers(const std::vector<Frontier> & frontiers);
 private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
