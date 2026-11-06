@@ -6,6 +6,9 @@ MapExplorer::MapExplorer() : rclcpp::Node("map_explorer") {
         "/map", 10, std::bind(&MapExplorer::map_cb, this, std::placeholders::_1));
     odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
         "/odom", 10, std::bind(&MapExplorer::odom_cb, this, std::placeholders::_1));
+    pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+        "/current_pose", 10, std::bind(&MapExplorer::pose_cb, this, std::placeholders::_1));
+    navigate_action_client_ = rclcpp_action::create_client<nav2_msgs::action::NavigateThroughPoses>(this, "navigate_through_poses");
 }
 
 void MapExplorer::map_cb(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
@@ -15,11 +18,16 @@ void MapExplorer::map_cb(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
     if (is_valid_map(*latest_map_)) {
         RCLCPP_INFO(this->get_logger(), "Received a valid map.");
         clusters = detect_frontiers(*latest_map_);
-        vec_frontiers = process_frontiers(clusters);
-
+        frontier2nav = process_frontiers(clusters);
+        navigate_to_frontier(frontier2nav);
     } else {
         RCLCPP_WARN(this->get_logger(), "Received an invalid map.");
     }
+}
+
+void MapExplorer::pose_cb(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg) {
+    curr_pose_ = *msg;
+    RCLCPP_INFO(this->get_logger(), "Received current pose: (%.2f, %.2f)", curr_pose_.pose.pose.position.x, curr_pose_.pose.pose.position.y);
 }
 
 void MapExplorer::odom_cb(const nav_msgs::msg::Odometry::SharedPtr msg) {
@@ -101,14 +109,13 @@ std::vector<std::vector<Frontier>> MapExplorer::detect_frontiers(const nav_msgs:
     return clusters;
 }
 
-std::vector<Frontier> MapExplorer::process_frontiers(const std::vector<std::vector<Frontier>> & clusters) {
+Frontier MapExplorer::process_frontiers(const std::vector<std::vector<Frontier>> & clusters) {
     std::vector<Frontier> frontiers;
     std::vector<int> cluster_n;
     const int n = static_cast<int>(clusters.size());
     if(clusters.empty()){
         RCLCPP_INFO(this->get_logger(), "No frontiers detected.");
-        publish_frontiers(frontiers, cluster_n);  // Publish empty marker array
-        return clusters.empty() ? frontiers : clusters[0];  // Return empty if no clusters
+        return publish_frontiers(frontiers, cluster_n);  // Publish empty marker array
     }
     for(auto cluster : clusters){
         if (n == 0 || n <= 8) continue;
@@ -119,13 +126,15 @@ std::vector<Frontier> MapExplorer::process_frontiers(const std::vector<std::vect
         frontiers.push_back(median);
         cluster_n.push_back(n);
     }
-    publish_frontiers(frontiers, cluster_n);
-    process_frontiers(frontiers);
-    return frontiers;
+    return publish_frontiers(frontiers, cluster_n);
 }
 
 Frontier MapExplorer::publish_frontiers(const std::vector<Frontier> & frontiers, const std::vector<int> & cluster_n) {
-    if (!latest_map_) return;
+    if (!latest_map_) return Frontier{-1, -1};
+    if (frontiers.empty() || cluster_n.empty()) {
+        RCLCPP_INFO(this->get_logger(), "No frontiers to publish.");
+        return Frontier{-1, -1};
+    }
     const auto & info = latest_map_->info;
     const double res = info.resolution;
 
@@ -173,7 +182,6 @@ Frontier MapExplorer::publish_frontiers(const std::vector<Frontier> & frontiers,
         RCLCPP_INFO(this->get_logger(), "Frontier cell (%d, %d) -> world (%.2f, %.2f)",
                     frontier.x, frontier.y, wx, wy);
         marker_array.markers.push_back(marker);
-        // Navigate to the biggest cluster frontiers[bigger_cluster_index]
     }
     RCLCPP_INFO(this->get_logger(), "Biggest cluster index: %d, size: %d", bigger_cluster_index, bigger_cluster_n);
 
@@ -181,13 +189,120 @@ Frontier MapExplorer::publish_frontiers(const std::vector<Frontier> & frontiers,
     return bigger_cluster_index != -1 ? frontiers[bigger_cluster_index] : Frontier{-1, -1};
 }
 
-void MapExplorer::process_frontiers(const std::vector<Frontier> & frontiers) {
-    if (frontiers.empty()) {
-        RCLCPP_INFO(this->get_logger(), "No frontiers to process.");
+bool MapExplorer::navigate_to_frontier(const Frontier & frontier) {
+    if (!latest_map_ || !is_valid_map(*latest_map_) ||
+        frontier.x < 0 || frontier.y < 0 ||
+        frontier.x >= static_cast<int>(latest_map_->info.width) ||
+        frontier.y >= static_cast<int>(latest_map_->info.height)) {
+        RCLCPP_WARN(this->get_logger(), "Cannot navigate to an invalid frontier.");
+        return false;
+    }
+
+    if (failed_frontier_valid_ &&
+        frontier.x == failed_frontier_.x && frontier.y == failed_frontier_.y) {
+        RCLCPP_INFO(
+            this->get_logger(),
+            "Skipping frontier (%d, %d); its navigation retry cycle was exhausted.",
+            frontier.x, frontier.y);
+        return false;
+    }
+
+    if (navigation_active_) {
+        RCLCPP_INFO(this->get_logger(), "A navigation goal is already active.");
+        return false;
+    }
+
+    if (!navigate_action_client_->action_server_is_ready()) {
+        RCLCPP_WARN(this->get_logger(), "NavigateThroughPoses action server is not ready.");
+        return false;
+    }
+
+    const auto & info = latest_map_->info;
+    const auto & q = info.origin.orientation;
+    const double yaw = std::atan2(
+        2.0 * (q.w * q.z + q.x * q.y),
+        1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+    const double c = std::cos(yaw);
+    const double s = std::sin(yaw);
+    const double lx = (frontier.x + 0.5) * info.resolution;
+    const double ly = (frontier.y + 0.5) * info.resolution;
+
+    geometry_msgs::msg::PoseStamped pose;
+    pose.header.frame_id = latest_map_->header.frame_id;
+    pose.header.stamp = this->now();
+    pose.pose.position.x = info.origin.position.x + c * lx - s * ly;
+    pose.pose.position.y = info.origin.position.y + s * lx + c * ly;
+    pose.pose.orientation.w = 1.0;
+
+    navigation_goal_.poses.clear();
+    navigation_goal_.poses.push_back(pose);
+    navigation_frontier_ = frontier;
+    navigation_active_ = true;
+    navigation_attempt_ = 0;
+    goal_reached = false;
+    send_navigation_goal();
+    return true;  // Goal dispatched; completion is reported by the result callback.
+}
+
+void MapExplorer::send_navigation_goal() {
+    using GoalHandle =
+        rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateThroughPoses>;
+    using Feedback = nav2_msgs::action::NavigateThroughPoses::Feedback;
+
+    ++navigation_attempt_;
+    rclcpp_action::Client<nav2_msgs::action::NavigateThroughPoses>::SendGoalOptions options;
+    options.goal_response_callback =
+        [this](GoalHandle::SharedPtr goal_handle) {
+            if (!goal_handle) {
+                handle_navigation_failure("goal was rejected");
+            }
+        };
+    options.feedback_callback =
+        [this](GoalHandle::SharedPtr, const std::shared_ptr<const Feedback> feedback) {
+            RCLCPP_INFO(
+                this->get_logger(),
+                "Navigation attempt %u feedback: %.2f m remaining.",
+                navigation_attempt_, feedback->distance_remaining);
+        };
+    options.result_callback =
+        [this](const GoalHandle::WrappedResult & result) {
+            if (result.code == rclcpp_action::ResultCode::SUCCEEDED) {
+                navigation_active_ = false;
+                goal_reached = true;
+                RCLCPP_INFO(this->get_logger(), "Frontier navigation succeeded.");
+                return;
+            }
+
+            const char * reason = "navigation did not succeed";
+            if (result.code == rclcpp_action::ResultCode::ABORTED) {
+                reason = "navigation was aborted";
+            } else if (result.code == rclcpp_action::ResultCode::CANCELED) {
+                reason = "navigation was canceled";
+            }
+            handle_navigation_failure(reason);
+        };
+
+    RCLCPP_INFO(
+        this->get_logger(), "Sending navigation attempt %u of 3.",
+        navigation_attempt_);
+    navigate_action_client_->async_send_goal(navigation_goal_, options);
+}
+
+void MapExplorer::handle_navigation_failure(const char * reason) {
+    if (navigation_attempt_ < 3) {
+        RCLCPP_WARN(
+            this->get_logger(), "Navigation attempt %u failed (%s); retrying.",
+            navigation_attempt_, reason);
+        send_navigation_goal();
         return;
     }
-    RCLCPP_INFO(this->get_logger(), "Processing %zu frontiers.", frontiers.size());
-    for (const auto & frontier : frontiers) {
-        RCLCPP_INFO(this->get_logger(), "Frontier at cell (%d, %d)", frontier.x, frontier.y);
-    }
+
+    navigation_active_ = false;
+    goal_reached = false;
+    failed_frontier_ = navigation_frontier_;
+    failed_frontier_valid_ = true;
+    RCLCPP_ERROR(
+        this->get_logger(),
+        "Navigation failed after %u attempts (%s); stopping this navigation cycle.",
+        navigation_attempt_, reason);
 }

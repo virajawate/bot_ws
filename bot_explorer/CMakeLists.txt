@@ -26,7 +26,8 @@ install(TARGETS ${PROJECT_NAME}_lib
   EXPORT ${PROJECT_NAME}Targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin)
+  RUNTIME DESTINATION bin
+)
 
 add_executable(map_explorer src/mapexplorer_node.cpp)
 target_include_directories(map_explorer PUBLIC
