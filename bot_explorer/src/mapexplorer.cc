@@ -14,15 +14,19 @@ MapExplorer::MapExplorer() : rclcpp::Node("map_explorer") {
 void MapExplorer::map_cb(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
     latest_map_ = msg;
     map_received_ = true;
-    std::vector<std::vector<Frontier>> clusters;
-    if (is_valid_map(*latest_map_)) {
-        RCLCPP_INFO(this->get_logger(), "Received a valid map.");
-        clusters = detect_frontiers(*latest_map_);
-        frontier2nav = process_frontiers(clusters);
-        navigate_to_frontier(frontier2nav);
-    } else {
-        RCLCPP_WARN(this->get_logger(), "Received an invalid map.");
+
+    if (navigation_active_ || exploration_stopped_) {
+        return;
     }
+
+    if (!is_valid_map(*latest_map_)) {
+        RCLCPP_WARN(this->get_logger(), "Received an invalid map.");
+        return;
+    }
+
+    const auto clusters = detect_frontiers(*latest_map_);
+    frontier2nav = process_frontiers(clusters);
+    navigate_to_frontier(frontier2nav);
 }
 
 void MapExplorer::pose_cb(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg) {

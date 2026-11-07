@@ -47,7 +47,7 @@ private:
     nav2_msgs::action::NavigateThroughPoses::Goal navigation_goal_;
     std::vector<std::vector<Frontier>> vec_frontier_clusters;
     bool map_received_{false}, goal_reached{false}, navigation_active_{false};
-    bool failed_frontier_valid_{false};
+    bool failed_frontier_valid_{false}, exploration_stopped_{false};
     unsigned int navigation_attempt_{0};
     Frontier frontier2nav, navigation_frontier_, failed_frontier_;
 };
