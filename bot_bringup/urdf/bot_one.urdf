@@ -188,7 +188,7 @@
     <sensor type="gpu_lidar" name="laser">
       <always_on>true</always_on>
       <visualize>true</visualize>
-      <update_rate>1</update_rate>
+      <update_rate>10</update_rate>
       <topic>/scan</topic>
       <ray>
         <scan>
