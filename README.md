@@ -11,4 +11,7 @@ ros2 launch bot_sim bot_sim.launch.py
 
 # For Mapping
 ros2 launch bot_nav bot_slam.launch.py
+
+# For Navigation
+ros2 launch bot_nav bot_nav.launch.py
 ```
