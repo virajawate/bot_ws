@@ -9,4 +9,6 @@ ros2 launch bot_bringup bot_bringup.launch.py
 # For Simulation
 ros2 launch bot_sim bot_sim.launch.py
 
+# For Mapping
+ros2 launch bot_nav bot_slam.launch.py
 ```
