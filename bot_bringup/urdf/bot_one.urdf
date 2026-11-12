@@ -66,7 +66,7 @@
   <joint name="wheel_right_joint" type="continuous">
     <parent link="base_link"/>
     <child link="wheel_right_link"/>
-    <origin xyz="0.0 ${-0.25 * scale} ${0.15 * scale}" rpy="-1.57 0.0 0.0"/>
+    <origin xyz="0.0 ${-0.25 * scale} 0.0" rpy="-1.57 0.0 0.0"/>
     <axis xyz="0.0 0.0 1.0"/>
   </joint>
 
@@ -91,7 +91,7 @@
   </link>
 
   <joint name="wheel_left_joint" type="continuous">
-    <origin xyz="0.0 ${0.25 * scale} ${0.15 * scale}" rpy="-1.57 0.0 0.0"/>
+    <origin xyz="0.0 ${0.25 * scale} 0.0" rpy="-1.57 0.0 0.0"/>
     <parent link="base_link"/>
     <child link="wheel_left_link"/>
     <axis xyz="0.0 0.0 1.0"/>
@@ -151,7 +151,7 @@
   </link>
 
   <joint name="laser_joint" type="fixed">
-    <origin xyz="${0.525 * scale} 0.0 ${0.225 * scale}" rpy="0.0 0.0 0.0"/>
+    <origin xyz="${0.525 * scale} 0.0 ${0.6 * scale}" rpy="0.0 0.0 0.0"/>
     <parent link="base_footprint"/>
     <child link="laser"/>
   </joint>
@@ -195,8 +195,8 @@
           <horizontal>
             <samples>300</samples>
             <resolution>1.0</resolution>
-            <min_angle>-1.57</min_angle>
-            <max_angle>1.57</max_angle>
+            <min_angle>-3.141592653589793</min_angle>
+            <max_angle>3.141592653589793</max_angle>
           </horizontal>
         </scan>
         <range>
