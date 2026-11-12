@@ -23,7 +23,7 @@ def generate_launch_description():
         launch_arguments=[
             ('use_sim_time', LaunchConfiguration('use_sim_time'),), 
             ('rviz_config_file', LaunchConfiguration('rviz_file')),
-            ('world_file', LaunchConfiguration('world_file'))
+            ('world_arg', LaunchConfiguration('world_file'))
         ],
     )
 

@@ -8,7 +8,7 @@ MapExplorer::MapExplorer() : rclcpp::Node("map_explorer") {
         "/odom", 10, std::bind(&MapExplorer::odom_cb, this, std::placeholders::_1));
     pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
         "/current_pose", 10, std::bind(&MapExplorer::pose_cb, this, std::placeholders::_1));
-    navigate_action_client_ = rclcpp_action::create_client<nav2_msgs::action::NavigateThroughPoses>(this, "navigate_through_poses");
+    navigate_action_client_ = rclcpp_action::create_client<nav2_msgs::action::NavigateToPose>(this, "navigate_to_pose");
 }
 
 void MapExplorer::map_cb(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
@@ -25,18 +25,20 @@ void MapExplorer::map_cb(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
     }
 
     const auto clusters = detect_frontiers(*latest_map_);
-    frontier2nav = process_frontiers(clusters);
-    navigate_to_frontier(frontier2nav);
+    const auto frontiers = process_frontiers(clusters);
+    if (!frontiers.empty()) {
+        navigate_to_frontier(frontiers.front());
+    }
 }
 
 void MapExplorer::pose_cb(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg) {
     curr_pose_ = *msg;
-    RCLCPP_INFO(this->get_logger(), "Received current pose: (%.2f, %.2f)", curr_pose_.pose.pose.position.x, curr_pose_.pose.pose.position.y);
+    // RCLCPP_INFO(this->get_logger(), "Received current pose: (%.2f, %.2f)", curr_pose_.pose.pose.position.x, curr_pose_.pose.pose.position.y);
 }
 
 void MapExplorer::odom_cb(const nav_msgs::msg::Odometry::SharedPtr msg) {
     latest_odom_ = msg;
-    RCLCPP_INFO(this->get_logger(), "Received odometry data.");
+    // RCLCPP_INFO(this->get_logger(), "Received odometry data.");
 }
 
 bool MapExplorer::is_valid_map(const nav_msgs::msg::OccupancyGrid & map) {
@@ -113,31 +115,37 @@ std::vector<std::vector<Frontier>> MapExplorer::detect_frontiers(const nav_msgs:
     return clusters;
 }
 
-Frontier MapExplorer::process_frontiers(const std::vector<std::vector<Frontier>> & clusters) {
+std::vector<Frontier> MapExplorer::process_frontiers(
+    const std::vector<std::vector<Frontier>> & clusters) {
     std::vector<Frontier> frontiers;
     std::vector<int> cluster_n;
-    const int n = static_cast<int>(clusters.size());
-    if(clusters.empty()){
+    if (clusters.empty()) {
         RCLCPP_INFO(this->get_logger(), "No frontiers detected.");
-        return publish_frontiers(frontiers, cluster_n);  // Publish empty marker array
+        publish_frontiers(frontiers, cluster_n);
+        return frontiers;
     }
-    for(auto cluster : clusters){
-        if (n == 0 || n <= 8) continue;
-        std::nth_element(cluster.begin(), cluster.begin() + n / 2, cluster.end(), [](const Frontier & a, const Frontier & b) {
+    for (auto cluster : clusters) {
+        if (cluster.size() <= 8) {
+            continue;
+        }
+        const auto middle = cluster.begin() + cluster.size() / 2;
+        std::nth_element(cluster.begin(), middle, cluster.end(), [](const Frontier & a, const Frontier & b) {
             return a.x < b.x;
         });
-        Frontier median = cluster[n / 2];
+        Frontier median = *middle;
         frontiers.push_back(median);
-        cluster_n.push_back(n);
+        cluster_n.push_back(static_cast<int>(cluster.size()));
     }
-    return publish_frontiers(frontiers, cluster_n);
+    publish_frontiers(frontiers, cluster_n);
+    return frontiers;
 }
 
-Frontier MapExplorer::publish_frontiers(const std::vector<Frontier> & frontiers, const std::vector<int> & cluster_n) {
-    if (!latest_map_) return Frontier{-1, -1};
+void MapExplorer::publish_frontiers(
+    const std::vector<Frontier> & frontiers, const std::vector<int> & cluster_n) {
+    if (!latest_map_) return;
     if (frontiers.empty() || cluster_n.empty()) {
         RCLCPP_INFO(this->get_logger(), "No frontiers to publish.");
-        return Frontier{-1, -1};
+        return;
     }
     const auto & info = latest_map_->info;
     const double res = info.resolution;
@@ -155,15 +163,9 @@ Frontier MapExplorer::publish_frontiers(const std::vector<Frontier> & frontiers,
     marker_array.markers.push_back(clear);
 
     int id = 0;
-    int bigger_cluster_n = 0;
-    int bigger_cluster_index = -1;
     for (size_t i = 0; i < frontiers.size(); ++i) {
         const auto & frontier = frontiers[i];
         const int cluster_size = cluster_n[i];
-        if (cluster_size > bigger_cluster_n) {
-            bigger_cluster_n = cluster_size;
-            bigger_cluster_index = i;
-        }
         RCLCPP_INFO(this->get_logger(), "Frontier %zu: cell (%d, %d), cluster size: %d", i, frontier.x, frontier.y, cluster_size);
         const double lx = (frontier.x + 0.5) * res;
         const double ly = (frontier.y + 0.5) * res;
@@ -187,10 +189,8 @@ Frontier MapExplorer::publish_frontiers(const std::vector<Frontier> & frontiers,
                     frontier.x, frontier.y, wx, wy);
         marker_array.markers.push_back(marker);
     }
-    RCLCPP_INFO(this->get_logger(), "Biggest cluster index: %d, size: %d", bigger_cluster_index, bigger_cluster_n);
 
     marker_pub_->publish(marker_array);
-    return bigger_cluster_index != -1 ? frontiers[bigger_cluster_index] : Frontier{-1, -1};
 }
 
 bool MapExplorer::navigate_to_frontier(const Frontier & frontier) {
@@ -217,7 +217,7 @@ bool MapExplorer::navigate_to_frontier(const Frontier & frontier) {
     }
 
     if (!navigate_action_client_->action_server_is_ready()) {
-        RCLCPP_WARN(this->get_logger(), "NavigateThroughPoses action server is not ready.");
+        RCLCPP_WARN(this->get_logger(), "NavigateToPose action server 'navigate_to_pose' is not ready.");
         return false;
     }
 
@@ -238,23 +238,21 @@ bool MapExplorer::navigate_to_frontier(const Frontier & frontier) {
     pose.pose.position.y = info.origin.position.y + s * lx + c * ly;
     pose.pose.orientation.w = 1.0;
 
-    navigation_goal_.poses.clear();
-    navigation_goal_.poses.push_back(pose);
+    navigation_goal_.pose = pose;
     navigation_frontier_ = frontier;
     navigation_active_ = true;
     navigation_attempt_ = 0;
     goal_reached = false;
-    send_navigation_goal();
-    return true;  // Goal dispatched; completion is reported by the result callback.
+    return send_navigation_goal();
 }
 
-void MapExplorer::send_navigation_goal() {
+bool MapExplorer::send_navigation_goal() {
     using GoalHandle =
-        rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateThroughPoses>;
-    using Feedback = nav2_msgs::action::NavigateThroughPoses::Feedback;
+        rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateToPose>;
+    using Feedback = nav2_msgs::action::NavigateToPose::Feedback;
 
     ++navigation_attempt_;
-    rclcpp_action::Client<nav2_msgs::action::NavigateThroughPoses>::SendGoalOptions options;
+    rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SendGoalOptions options;
     options.goal_response_callback =
         [this](GoalHandle::SharedPtr goal_handle) {
             if (!goal_handle) {
@@ -263,8 +261,8 @@ void MapExplorer::send_navigation_goal() {
         };
     options.feedback_callback =
         [this](GoalHandle::SharedPtr, const std::shared_ptr<const Feedback> feedback) {
-            RCLCPP_INFO(
-                this->get_logger(),
+            RCLCPP_INFO_THROTTLE(
+                this->get_logger(), *this->get_clock(), 2000,
                 "Navigation attempt %u feedback: %.2f m remaining.",
                 navigation_attempt_, feedback->distance_remaining);
         };
@@ -290,6 +288,7 @@ void MapExplorer::send_navigation_goal() {
         this->get_logger(), "Sending navigation attempt %u of 3.",
         navigation_attempt_);
     navigate_action_client_->async_send_goal(navigation_goal_, options);
+    return true;
 }
 
 void MapExplorer::handle_navigation_failure(const char * reason) {
