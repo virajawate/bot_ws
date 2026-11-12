@@ -2,47 +2,12 @@
 
 Prioritized from the repository review on 2026-11-12. The repository currently has no open issues or pull requests.
 
-## 1. Correct frontier cluster selection
+- [ ] **Correct frontier cluster selection** — **Priority:** High. **Location:** `bot_explorer/src/mapexplorer.cc`, `process_frontiers()`. The code uses the total number of clusters to decide whether to skip processing and to calculate each cluster's median index and recorded size. Use the current cluster's size for those calculations. Define and document the intended minimum frontier-cluster size, then apply it consistently when filtering and selecting goals. **Done when:** small and uneven clusters are handled safely, the minimum-size behavior is explicit, and the selected goal is taken from the largest eligible cluster.
 
-**Priority:** High  
-**Location:** `bot_explorer/src/mapexplorer.cc`, `process_frontiers()`
+- [ ] **Add frontier-selection tests and a simulation smoke test** — **Priority:** High. **Locations:** `bot_explorer/`, repository test/CI configuration. There are no visible tests or CI workflows. Add focused tests for empty input, clusters below and above the minimum size, uneven cluster sizes, and largest-cluster selection. Add a smoke test or documented repeatable simulation check confirming that the explorer sends a usable navigation goal. **Done when:** tests run through the standard ROS build/test workflow and the simulation check can be repeated from documented instructions.
 
-The current code uses the total number of clusters to decide whether to skip processing and to calculate each cluster's median index and recorded size. Those calculations should use the current cluster's size. Define and document the intended minimum frontier-cluster size, then use it consistently when filtering and selecting goals.
+- [ ] **Remove the machine-specific map path** — **Priority:** Medium. **Location:** `bot_nav/config/nav2_params.yaml`, `map_server.ros__parameters.yaml_filename`. The map server config hard-codes `/home/viraj/personal_ws/bot_ws/bot_nav/config/batman.yaml`, which will not work on other machines. Make the map location portable and consistent with the `map` launch argument in `bot_nav/launch/bot_nav.launch.py`. **Done when:** the default map launches without a user-specific absolute path and a caller can provide a different map via the launch argument.
 
-**Done when:** small and uneven cluster sizes are handled safely; the intended minimum-size behavior is explicit; the selected goal is taken from the largest eligible cluster.
+- [ ] **Document setup and run commands** — **Priority:** Medium. **Location:** `README.md`. The README currently only describes the workspace. Document required ROS/Gazebo dependencies, build steps, and how to launch simulation, navigation with a saved map, and SLAM. **Done when:** a new contributor can follow the README from a clean workspace through at least one successful simulation/navigation run.
 
-## 2. Add frontier-selection tests and a simulation smoke test
-
-**Priority:** High  
-**Locations:** `bot_explorer/`, repository test/CI configuration
-
-There are no visible tests or CI workflows. Add focused tests for empty input, clusters below and above the minimum size, uneven cluster sizes, and largest-cluster selection. Add a smoke test or documented repeatable simulation check that confirms the explorer sends a usable navigation goal.
-
-**Done when:** the tests run through the repository's standard ROS build/test workflow and the simulation check can be repeated from documented instructions.
-
-## 3. Remove the machine-specific map path
-
-**Priority:** Medium  
-**Location:** `bot_nav/config/nav2_params.yaml`, `map_server.ros__parameters.yaml_filename`
-
-The map server config hard-codes `/home/viraj/personal_ws/bot_ws/bot_nav/config/batman.yaml`, which will not work on other machines. Make the map location portable and consistent with the `map` launch argument in `bot_nav/launch/bot_nav.launch.py`.
-
-**Done when:** the default map launches without a user-specific absolute path, and a caller can still provide a different map via the launch argument.
-
-## 4. Document setup and run commands
-
-**Priority:** Medium  
-**Location:** `README.md`
-
-The README currently only describes the workspace. Document required ROS/Gazebo dependencies, build steps, and how to launch simulation, navigation with a saved map, and SLAM.
-
-**Done when:** a new contributor can follow the README from a clean workspace through at least one successful simulation/navigation run.
-
-## 5. Remove generated Python bytecode from version control
-
-**Priority:** Low  
-**Locations:** `bot_bringup/launch/__pycache__/`, `bot_nav/launch/__pycache__/`, `bot_sim/launch/__pycache__/`, `.gitignore`
-
-Python bytecode files are tracked in launch directories. Remove generated `__pycache__` artifacts and add ignore rules so they are not re-added.
-
-**Done when:** no `__pycache__` or `.pyc` artifacts remain tracked and future generated bytecode is ignored.
+- [ ] **Remove generated Python bytecode from version control** — **Priority:** Low. **Locations:** `bot_bringup/launch/__pycache__/`, `bot_nav/launch/__pycache__/`, `bot_sim/launch/__pycache__/`, `.gitignore`. Python bytecode files are tracked in launch directories. Remove generated `__pycache__` artifacts and add ignore rules so they are not re-added. **Done when:** no `__pycache__` or `.pyc` artifacts remain tracked and future generated bytecode is ignored.
