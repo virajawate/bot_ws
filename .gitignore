@@ -4,3 +4,4 @@ install/
 log/
 *_v*.cc
 *_v*.h
+*_v*.*
