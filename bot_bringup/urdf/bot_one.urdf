@@ -1,14 +1,10 @@
 <?xml version="1.0" ?>
-<robot name="Jeevan" xmlns:xacro="http://www.ros.org/wiki/xacro">
-  <xacro:property name="scale" value="0.5"/>
-  <xacro:property name="wheel_slip1" value="0.1"/>
-  <xacro:property name="wheel_slip2" value="0.1"/>
-
+<robot name="Jeevan">
   <link name="base_footprint">
     <visual>
-      <origin xyz="0.0 0.0 0.015" rpy="0.0 0.0 0.0"/>
+      <origin xyz="0.0 0.0 0.025" rpy="0.0 0.0 0.0"/>
       <geometry>
-        <box size="${0.1 * scale} ${0.1 * scale} ${0.1 * scale}"/>
+        <box size="0.05 0.05 0.05"/>
       </geometry>
     </visual>
   </link>
@@ -16,14 +12,14 @@
   <joint name="base_joint" type="fixed">
     <parent link="base_footprint"/>
     <child link="base_link"/>
-    <origin xyz="${0.15 * scale} 0.0 ${0.15 * scale}" rpy="0.0 0.0 0.0"/>
+    <origin xyz="0.075 0.0 0.075" rpy="0.0 0.0 0.0"/>
   </joint>
 
   <link name="base_link">
     <visual>
       <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
       <geometry>
-        <box size="${0.75 * scale} ${0.4 * scale} ${0.1 * scale}"/>
+        <box size="0.375 0.2 0.05"/>
       </geometry>
       <material name="gray">
         <color rgba=".2 .2 .2 1"/>
@@ -32,7 +28,7 @@
     <collision>
       <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
       <geometry>
-        <box size="${0.75 * scale} ${0.4 * scale} ${0.1 * scale}"/>
+        <box size="0.375 0.2 0.05"/>
       </geometry>
     </collision>
     <inertial>
@@ -49,7 +45,7 @@
     <visual>
       <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
       <geometry>
-        <cylinder radius="${0.15 * scale}" length="${0.1 * scale}"/>
+        <cylinder radius="0.075" length="0.05"/>
       </geometry>
       <material name="black">
         <color rgba="0 0 0 1"/>
@@ -58,15 +54,15 @@
     <collision>
       <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
       <geometry>
-        <cylinder radius="${0.15 * scale}" length="${0.1 * scale}"/>
+        <cylinder radius="0.075" length="0.05"/>
       </geometry>
     </collision>
   </link>
 
   <joint name="wheel_right_joint" type="continuous">
-    <parent link="base_link"/>
+    <parent link="base_footprint"/>
     <child link="wheel_right_link"/>
-    <origin xyz="0.0 ${-0.25 * scale} 0.0" rpy="-1.57 0.0 0.0"/>
+    <origin xyz="0.0 -0.125 0.075" rpy="-1.57 0.0 0.0"/>
     <axis xyz="0.0 0.0 1.0"/>
   </joint>
 
@@ -78,21 +74,21 @@
     <visual>
       <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
       <geometry>
-        <cylinder radius="${0.15 * scale}" length="${0.1 * scale}"/>
+        <cylinder radius="0.075" length="0.05"/>
       </geometry>
       <material name="black"/>
     </visual>
     <collision>
       <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
       <geometry>
-        <cylinder radius="${0.15 * scale}" length="${0.1 * scale}"/>
+        <cylinder radius="0.075" length="0.05"/>
       </geometry>
     </collision>
   </link>
 
   <joint name="wheel_left_joint" type="continuous">
-    <origin xyz="0.0 ${0.25 * scale} 0.0" rpy="-1.57 0.0 0.0"/>
-    <parent link="base_link"/>
+    <origin xyz="0.0 0.125 0.075" rpy="-1.57 0.0 0.0"/>
+    <parent link="base_footprint"/>
     <child link="wheel_left_link"/>
     <axis xyz="0.0 0.0 1.0"/>
   </joint>
@@ -105,14 +101,14 @@
     <visual>
       <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
       <geometry>
-        <sphere radius="${0.081 * scale}"/>
+        <sphere radius="0.0405"/>
       </geometry>
       <material name="blue"/>
     </visual>
     <collision>
       <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
       <geometry>
-        <sphere radius="${0.081 * scale}"/>
+        <sphere radius="0.0405"/>
       </geometry>
     </collision>
   </link>
@@ -120,12 +116,12 @@
   <gazebo reference="caster">
     <mu1>0.1</mu1>
     <mu2>0.1</mu2>
-    <slip1>${wheel_slip1}</slip1>
-    <slip2>${wheel_slip2}</slip2>
+    <slip1>0.1</slip1>
+    <slip2>0.1</slip2>
   </gazebo>
 
   <joint name="caster_joint" type="fixed">
-    <origin xyz="${0.45 * scale} 0.0 ${0.076 * scale}" rpy="0.0 0.0 0.0"/>
+    <origin xyz="0.225 0.0 0.038" rpy="0.0 0.0 0.0"/>
     <parent link="base_footprint"/>
     <child link="caster"/>
   </joint>
@@ -137,7 +133,7 @@
     </inertial>
     <visual>
       <geometry>
-        <cylinder radius="${0.05 * scale}" length="${0.05 * scale}"/>
+        <cylinder radius="0.025" length="0.025"/>
       </geometry>
       <material name="white">
         <color rgba="1 1 1 1"/>
@@ -145,13 +141,13 @@
     </visual>
     <collision>
       <geometry>
-        <sphere radius="${0.08 * scale}"/>
+        <sphere radius="0.04"/>
       </geometry>
     </collision>
   </link>
 
   <joint name="laser_joint" type="fixed">
-    <origin xyz="${0.525 * scale} 0.0 ${0.6 * scale}" rpy="0.0 0.0 0.0"/>
+    <origin xyz="0.2625 0.0 0.1125" rpy="0.0 0.0 0.0"/>
     <parent link="base_footprint"/>
     <child link="laser"/>
   </joint>
@@ -170,8 +166,8 @@
         <frame_id>odom</frame_id>
         <child_frame_id>base_footprint</child_frame_id>
         <tf_topic>/tf</tf_topic>
-        <wheel_separation>${0.5 * scale}</wheel_separation>
-        <wheel_radius>${0.15 * scale}</wheel_radius>
+        <wheel_separation>0.25</wheel_separation>
+        <wheel_radius>0.075</wheel_radius>
         <odom_publish_frequency>20</odom_publish_frequency>
         <max_linear_acceleration>1</max_linear_acceleration>
         <min_linear_acceleration>-1</min_linear_acceleration>
@@ -193,14 +189,14 @@
       <ray>
         <scan>
           <horizontal>
-            <samples>300</samples>
+            <samples>1000</samples>
             <resolution>1.0</resolution>
-            <min_angle>-3.141592653589793</min_angle>
-            <max_angle>3.141592653589793</max_angle>
+            <min_angle>-2.0943951023931953</min_angle>
+            <max_angle>2.0943951023931953</max_angle>
           </horizontal>
         </scan>
         <range>
-          <min>0.1</min>
+          <min>0.05</min>
           <max>10.0</max>
         </range>
       </ray>
@@ -214,7 +210,7 @@
     </inertial>
     <visual>
       <geometry>
-        <box size="${0.05 * scale} ${0.05 * scale} ${0.05 * scale}"/>
+        <box size="0.025 0.025 0.025"/>
       </geometry>
       <material name="brown">
         <color rgba="0.6 0.4 0 1"/>
@@ -223,7 +219,7 @@
     <collision>
       <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
       <geometry>
-        <box size="${0.05 * scale} ${0.05 * scale} ${0.05 * scale}"/>
+        <box size="0.025 0.025 0.025"/>
       </geometry>
     </collision>
   </link>
@@ -232,7 +228,7 @@
     <axis xyz="0.0 0.0 0.0"/>
     <parent link="base_footprint"/>
     <child link="camera_link"/>
-    <origin xyz="${0.545 * scale} 0.0 ${0.275 * scale}" rpy="0 0 0"/>
+    <origin xyz="0.2725 0.0 0.1375" rpy="0 0 0"/>
   </joint>
 
   <gazebo reference="camera_link">
